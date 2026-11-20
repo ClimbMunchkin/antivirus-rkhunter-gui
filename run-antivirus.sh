@@ -61,7 +61,7 @@ Update() {
 
         echo "100"; echo "# Обновление завершено."
     ) | zenity --progress --title="$TITLE" \
-        --text="Обновление антивируса..." --width=400  \
+        --text="Обновление антивируса..." --width=400 \
         --percentage=0 --auto-close --no-cancel
 }
 
@@ -82,7 +82,7 @@ Check() {
         sleep 1
         echo "100"; echo "# Готово."
     ) | zenity --progress --title="$TITLE" \
-        --text="Поиск уязвимостей..." --width=400 \ 
+        --text="Поиск уязвимостей..." --width=400 \
         --percentage=0 --auto-close --pulsate
 
     local err
