@@ -1,8 +1,31 @@
 #!/bin/bash
 # GUI-проверка системы на вирусы с помощью rkhunter (Zenity)
+# Использование:
+#   ./antivirus.sh          — обычный режим (2 пункта)
+#   ./antivirus.sh -a       — расширенный режим (4 пункта)
+#   ./antivirus.sh --advanced
 
 LOG="/home/jazzzman/antivirus-report.log"
 TITLE="Антивирусная проверка системы"
+ADVANCED=0
+
+# ---------- Разбор аргументов ----------
+for arg in "$@"; do
+    case "$arg" in
+        -a|--advanced) ADVANCED=1 ;;
+        -h|--help)
+            echo "Использование: $0 [-a|--advanced]"
+            echo "  -a, --advanced   расширенное меню (4 пункта)"
+            echo "  без ключа        обычное меню (2 пункта)"
+            exit 0
+            ;;
+        *)
+            echo "Неизвестный аргумент: $arg"
+            echo "Использование: $0 [-a|--advanced]"
+            exit 1
+            ;;
+    esac
+done
 
 # ---------- Проверка зависимостей ----------
 if ! command -v zenity &>/dev/null; then
@@ -38,7 +61,7 @@ Update() {
 
         echo "100"; echo "# Обновление завершено."
     ) | zenity --progress --title="$TITLE" \
-        --text="Обновление антивируса..." \
+        --text="Обновление антивируса..." --width=400  \
         --percentage=0 --auto-close --no-cancel
 }
 
@@ -59,7 +82,7 @@ Check() {
         sleep 1
         echo "100"; echo "# Готово."
     ) | zenity --progress --title="$TITLE" \
-        --text="Поиск уязвимостей..." \
+        --text="Поиск уязвимостей..." --width=400 \ 
         --percentage=0 --auto-close --pulsate
 
     local err
@@ -68,9 +91,7 @@ Check() {
 
     sudo chown "$(id -u):$(id -g)" "$LOG" 2>/dev/null
 
-    # ---------- Итоговое окно ----------
     if [ -n "$err" ]; then
-        # Показываем предупреждения в прокручиваемом окне
         echo "$err" | zenity --text-info \
             --title="⚠ Обнаружены предупреждения" \
             --width=800 --height=500 \
@@ -79,42 +100,63 @@ Check() {
         zenity --warning --title="$TITLE" --width=450 \
             --text="<b><span color='red' size='large'>Внимание!</span></b>\n\nОбнаружены возможные угрозы.\nПодробности — в отчёте:\n<tt>$LOG</tt>" \
             --ok-label="Закрыть"
-        exit 1
+        return 1
     else
         zenity --info --title="$TITLE" --width=450 \
             --text="<b><span color='green' size='large'>✔ Проверка прошла успешно</span></b>\n\nВирусных угроз не обнаружено.\nОтчёт сохранён в:\n<tt>$LOG</tt>" \
             --ok-label="Закрыть"
-        exit 0
+        return 0
+    fi
+}
+
+# ---------- Показать отчёт ----------
+ShowReport() {
+    if [ -f "$LOG" ]; then
+        zenity --text-info --title="Отчёт антивируса" \
+            --filename="$LOG" --width=900 --height=600
+    else
+        zenity --warning --title="$TITLE" \
+            --text="Файл отчёта не найден:\n$LOG"
     fi
 }
 
 # ---------- Главное меню ----------
 while true; do
-    ACTION=$(zenity --list --title="$TITLE" \
-        --text="Выберите действие:" \
-        --column="Действие" --column="Описание" \
-        "Обновить + Проверить" "Обновить базу и запустить полную проверку" \
-        "Только проверить"     "Запустить проверку без обновления" \
-        "Только обновить"      "Обновить антивирусную базу" \
-        "Показать отчёт"       "Открыть последний отчёт ($LOG)" \
-        --width=600 --height=350 \
-        --ok-label="Выполнить" --cancel-label="Выход") || exit 0
+    if [ "$ADVANCED" -eq 1 ]; then
+        # ----- Расширенный режим: 4 пункта -----
+        ACTION=$(zenity --list --title="$TITLE" \
+            --text="Выберите действие:" \
+            --column="Действие" --column="Описание" \
+            "Обновить и проверить" "Обновить базу и запустить полную проверку" \
+            "Только проверить"     "Запустить проверку без обновления" \
+            "Только обновить"      "Обновить антивирусную базу" \
+            "Показать отчёт"       "Открыть последний отчёт ($LOG)" \
+            --width=650 --height=250 \
+            --ok-label="Выполнить" --cancel-label="Выход") || exit 0
 
-    case "$ACTION" in
-        "Обновить + Проверить") Update; Check ;;
-        "Только проверить")     Check ;;
-        "Только обновить")      Update
-                                zenity --info --title="$TITLE" \
-                                    --text="Обновление завершено." ;;
-        "Показать отчёт")
-            if [ -f "$LOG" ]; then
-                zenity --text-info --title="Отчёт антивируса" \
-                    --filename="$LOG" --width=900 --height=600
-            else
-                zenity --warning --title="$TITLE" \
-                    --text="Файл отчёта не найден:\n$LOG"
-            fi
-            ;;
-        *) exit 0 ;;
-    esac
+        case "$ACTION" in
+            "Обновить и проверить") Update; Check ;;
+            "Только проверить")     Check ;;
+            "Только обновить")      Update
+                                    zenity --info --title="$TITLE" \
+                                        --text="Обновление завершено." ;;
+            "Показать отчёт")       ShowReport ;;
+            *) continue ;;   # ничего не выбрано — вернуться в меню
+        esac
+    else
+        # ----- Обычный режим: 2 пункта -----
+        ACTION=$(zenity --list --title="$TITLE" \
+            --text="Выберите действие:" \
+            --column="Действие" --column="Описание" \
+            "Обновить и проверить" "Обновить базу и запустить проверку" \
+            "Показать отчёт"       "Открыть последний отчёт ($LOG)" \
+            --width=650 --height=170 \
+            --ok-label="Выполнить" --cancel-label="Выход") || exit 0
+
+        case "$ACTION" in
+            "Обновить и проверить") Update; Check ;;
+            "Показать отчёт")       ShowReport ;;
+            *) continue ;;   # ничего не выбрано — вернуться в меню
+        esac
+    fi
 done
