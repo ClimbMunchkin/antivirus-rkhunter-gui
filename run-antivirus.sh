@@ -5,7 +5,11 @@
 #   ./antivirus.sh -a       — расширенный режим (4 пункта)
 #   ./antivirus.sh --advanced
 
-LOG="/home/jazzzman/antivirus-report.log"
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+[ -z "$REAL_HOME" ] && REAL_HOME="$HOME"
+LOG="$REAL_HOME/antivirus-report.log"
+
 TITLE="Антивирусная проверка системы"
 ADVANCED=0
 
