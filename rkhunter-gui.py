@@ -4,9 +4,9 @@
 GUI-проверка системы на вирусы с помощью rkhunter (PyQt5)
 
 Запуск через sudo:
-    sudo ./antivirus.py
-    sudo ./antivirus.py -a
-    sudo ./antivirus.py --advanced
+    sudo ./rkhunter-gui.py
+    sudo ./rkhunter-gui.py -a
+    sudo ./rkhunter-gui.py --advanced
 """
 
 import os
@@ -43,7 +43,7 @@ LOG_PATH = Path(REAL_HOME) / "antivirus-report.log"
 TITLE = "Антивирусная проверка системы"
 
 
-# ---------- Стили (в духе cleanup.py) ----------
+# ---------- Стили ----------
 STYLE = """
 QDialog { background: #f7f8fa; }
 
@@ -102,6 +102,81 @@ QPlainTextEdit {
     font-size: 9.5pt;
 }
 """
+
+
+# ---------- ANSI -> HTML ----------
+# Цветовые последовательности вида ESC[0;35m, ESC[1;32m, ESC[39m и т.п.
+_ANSI_SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
+# Курсорные последовательности вида ESC[34C (вправо на N позиций)
+_ANSI_CURSOR_RE = re.compile(r"\x1b\[(\d*)C")
+# Прочие escape-последовательности, которые нам не нужны (K, H, J и пр.)
+# ВАЖНО: 'm' исключён, но к моменту применения этой регулярки SGR уже разобраны.
+_ANSI_OTHER_RE = re.compile(r"\x1b\[[0-9;]*[A-LN-Za-ln-z]")
+
+# Сопоставление SGR-кодов (в виде строки "0;35") с цветами.
+# None = сброс цвета.
+_ANSI_COLORS = {
+    "0": None, "39": None, "": None,
+    "0;30": "#1e1e1e", "0;31": "#ff6b6b", "0;32": "#7ddc8f",
+    "0;33": "#ffcc66", "0;34": "#7ec4ff", "0;35": "#c792ea",
+    "0;36": "#89ddff", "0;37": "#d4d4d4",
+    "1;30": "#5a5a5a", "1;31": "#ff4d4d", "1;32": "#3fe06a",
+    "1;33": "#ffd633", "1;34": "#5aa9ff", "1;35": "#e0a3ff",
+    "1;36": "#a5e8ff", "1;37": "#ffffff",
+}
+
+
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;")
+              .replace("<", "&lt;")
+              .replace(">", "&gt;"))
+
+
+def _wrap_html(text: str, color) -> str:
+    """Обернуть текст в span, сохранив пробелы и, опционально, цвет."""
+    safe = _html_escape(text).replace(" ", "&nbsp;")
+    if color:
+        return (f"<span style='color:{color}; white-space:pre-wrap;'>"
+                f"{safe}</span>")
+    return f"<span style='white-space:pre-wrap;'>{safe}</span>"
+
+
+def ansi_to_html(text: str) -> str:
+    """
+    Преобразует строку с ANSI escape-последовательностями в HTML-фрагмент,
+    который можно скормить QPlainTextEdit.appendHtml().
+
+    Порядок операций ВАЖЕН:
+      1) курсорные [NN C -> пробелы;
+      2) разбор SGR-цветов (пока коды ещё в тексте);
+      3) вырезание прочих CSI (K, H, J и т.п.).
+    """
+    # 1) Курсорные [NN C -> соответствующее число пробелов
+    def _cursor_repl(m):
+        n = int(m.group(1)) if m.group(1) else 1
+        return " " * n
+
+    text = _ANSI_CURSOR_RE.sub(_cursor_repl, text)
+
+    # 2) Построчный разбор SGR с сохранением текущего цвета
+    out_parts = []
+    pos = 0
+    current_color = None
+    for m in _ANSI_SGR_RE.finditer(text):
+        chunk = text[pos:m.start()]
+        if chunk:
+            out_parts.append(_wrap_html(chunk, current_color))
+        code = m.group(1)
+        current_color = _ANSI_COLORS.get(code)  # неизвестный -> None (сброс)
+        pos = m.end()
+    tail = text[pos:]
+    if tail:
+        out_parts.append(_wrap_html(tail, current_color))
+
+    # 3) Только теперь вырезаем прочие CSI-последовательности
+    html = "".join(out_parts)
+    html = _ANSI_OTHER_RE.sub("", html)
+    return html
 
 
 # ---------- Обёртка над QProcess ----------
@@ -236,7 +311,7 @@ class AntivirusApp(QDialog):
         self._busy = False
 
         self.setWindowTitle(TITLE)
-        self.resize(600, 660)
+        self.resize(690, 660)
         self.setStyleSheet(STYLE)
 
         self._build_ui()
@@ -300,7 +375,7 @@ class AntivirusApp(QDialog):
         card_lay.addWidget(self.console)
 
         root.addWidget(card, 1)
-
+        
         # --- Футер ---
         self.footer = QLabel("")
         self.footer.setStyleSheet("font-size: 9.5pt; color: #555555;")
@@ -314,13 +389,18 @@ class AntivirusApp(QDialog):
 
     # ---------- Хелперы ----------
     def log_line(self, text, color=None):
+        """
+        Всегда выводит HTML. Если color задан — принудительно красит
+        всю строку в этот цвет (заголовки скрипта). Иначе — парсит ANSI.
+        """
         if color:
+            safe = _html_escape(text).replace(" ", "&nbsp;")
             self.console.appendHtml(
-                f"<span style='color:{color}; white-space:pre-wrap'>"
-                f"{self._esc(text)}</span>"
+                f"<span style='color:{color}; white-space:pre-wrap;'>"
+                f"{safe}</span>"
             )
         else:
-            self.console.appendPlainText(text)
+            self.console.appendHtml(ansi_to_html(text))
         self.console.moveCursor(QTextCursor.End)
 
     @staticmethod
@@ -448,7 +528,7 @@ class AntivirusApp(QDialog):
             [
                 "--check",
                 "--skip-keypress",
-                "--report-warnings-only",
+#                "--report-warnings-only",
                 "--logfile", str(LOG_PATH),
             ],
             on_done=self._after_check,
